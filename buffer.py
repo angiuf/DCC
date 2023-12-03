@@ -50,7 +50,7 @@ class SumTree:
 
         prefixsums = np.arange(0, p_sum, interval, dtype=np.float64) + np.random.uniform(0, interval, batch_size)
 
-        idxes = np.zeros(batch_size, dtype=np.int)
+        idxes = np.zeros(batch_size, dtype=int)
         for _ in range(self.layer-1):
             nodes = self.tree[idxes*2+1]
             idxes = np.where(prefixsums<nodes, idxes*2+1, idxes*2+2)
@@ -96,13 +96,13 @@ class LocalBuffer:
 
         self.chunk_capacity = config.chunk_capacity
 
-        self.obs_buf = np.zeros((burn_in_steps+capacity+1, num_agents, *obs_shape), dtype=np.bool)
-        self.last_act_buf = np.zeros((burn_in_steps+capacity+1, num_agents, 5), dtype=np.bool)
+        self.obs_buf = np.zeros((burn_in_steps+capacity+1, num_agents, *obs_shape), dtype=bool)
+        self.last_act_buf = np.zeros((burn_in_steps+capacity+1, num_agents, 5), dtype=bool)
         self.act_buf = np.zeros((capacity), dtype=np.uint8)
         self.rew_buf = np.zeros((capacity+forward_steps-1), dtype=np.float16)
         self.hidden_buf = np.zeros((burn_in_steps+capacity+1, num_agents, hidden_dim), dtype=np.float16)
-        self.relative_pos_buf = np.zeros((burn_in_steps+capacity+1, num_agents, num_agents, 2), dtype=np.int8)
-        self.comm_mask_buf = np.zeros((burn_in_steps+capacity+1, num_agents, num_agents), dtype=np.bool)
+        self.relative_pos_buf = np.zeros((burn_in_steps+capacity+1, num_agents, num_agents, 2), dtype=int8)
+        self.comm_mask_buf = np.zeros((burn_in_steps+capacity+1, num_agents, num_agents), dtype=bool)
         self.q_buf = np.zeros((capacity+1, action_dim), dtype=np.float32)
 
         self.capacity = capacity

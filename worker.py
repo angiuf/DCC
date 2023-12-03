@@ -390,7 +390,7 @@ class Actor:
             # sample action
             actions, q_val, hidden, relative_pos, comm_mask, _ = self.model.step(torch.from_numpy(obs.astype(np.float32)), 
                                                                             torch.from_numpy(last_act.astype(np.float32)), 
-                                                                            torch.from_numpy(pos.astype(np.int)))
+                                                                            torch.from_numpy(pos.astype(int)))
 
             if random.random() < self.epsilon:
                 # Note: only one agent do random action in order to keep the environment stable
@@ -410,7 +410,7 @@ class Actor:
                 else:
                     _, q_val, _, relative_pos, comm_mask = self.model.step(torch.from_numpy(next_obs.astype(np.float32)), 
                                                                             torch.from_numpy(last_act.astype(np.float32)), 
-                                                                            torch.from_numpy(next_pos.astype(np.int)))
+                                                                            torch.from_numpy(next_pos.astype(int)))
                     data = local_buffer.finish(q_val[0], relative_pos, comm_mask)
 
                 self.global_buffer.add.remote(data)
