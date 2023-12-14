@@ -12,12 +12,25 @@ import torch.multiprocessing as mp
 from environment import Environment
 from model import Network
 import config
+import datetime
+import csv
 
 torch.manual_seed(config.test_seed)
 np.random.seed(config.test_seed)
 random.seed(config.test_seed)
 DEVICE = torch.device('cpu')
 torch.set_num_threads(1)
+
+def get_csv_logger(model_dir, default_model_name):
+    csv_path = os.path.join(model_dir, "log-"+default_model_name+".csv")
+    create_folders_if_necessary(csv_path)
+    csv_file = open(csv_path, "a")
+    return csv_file, csv.writer(csv_file)
+
+def create_folders_if_necessary(path):
+    dirname = os.path.dirname(path)
+    if not os.path.isdir(dirname):
+        os.makedirs(dirname)
 
 def create_test(test_env_settings: Tuple = config.test_env_settings, num_test_cases: int = config.num_test_cases):
     '''
@@ -53,6 +66,11 @@ def test_model_custom_env(model_range: Union[int, tuple]):
 
     pool = mp.Pool(mp.cpu_count()//2)
 
+    model_path = "./final/"
+    date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+    model_name = 'evaluation_custom_warehouse_SCRIMP_' + date
+    csv_file, csv_logger = get_csv_logger(model_path, model_name)
+
     if isinstance(model_range, int):
         state_dict = torch.load(os.path.join(config.save_path, f'{model_range}.pth'), map_location=DEVICE)
         network.load_state_dict(state_dict)
@@ -68,23 +86,34 @@ def test_model_custom_env(model_range: Union[int, tuple]):
         #     print(len(tests))
 
         # create test set with random environment
-        tests = []
-        print("creating test set")
-        for _ in tqdm(range(config.num_test_cases)):
-            tests.append((get_warehouse_obs(), get_agents_and_goal(config.n_agents)[0], get_agents_and_goal(config.n_agents)[1]))
+        list_num_agents = [4, 8, 12, 16, 20, 22]
+        for num_agents in list_num_agents:
+            tests = []
+            print("creating test set")
+            for _ in tqdm(range(config.num_test_cases)):
+                tests.append((get_warehouse_obs(), get_agents_and_goal(num_agents)[0], get_agents_and_goal(num_agents)[1]))
 
-        tests = [(test, network) for test in tests]
+            tests = [(test, network, num_agents) for test in tests]
 
-        print("testing...")
-        ret = pool.map(test_one_case, tests)
+            print("testing...")
+            ret = pool.map(test_one_case, tests)
 
-        success, steps, num_comm = zip(*ret)
+            success, episode_length, num_comm, total_steps, avg_step = zip(*ret)
 
 
-        print("success rate: {:.2f}%".format(sum(success)/len(success)*100))
-        print("average step: {}".format(sum(steps)/len(steps)))
-        print("communication times: {}".format(sum(num_comm)/len(num_comm)))
-        print()
+            print("success rate: {:.2f}%".format(sum(success)/len(success)*100))
+            print("episode_length: {}".format(sum(episode_length)/len(episode_length)))
+            print("total_steps: {}".format(sum(total_steps)/len(total_steps)))
+            print("avg_step: {}".format(sum(avg_step)/len(avg_step)))
+            print("communication times: {}".format(sum(num_comm)/len(num_comm)))
+            print()
+
+            header = ["n_agents", "success_rate", "total_step", "avg_step", "episode_length", "communication_times"]
+            data = [num_agents, sum(success)/len(success)*100, sum(total_steps)/len(total_steps), sum(avg_step)/len(avg_step), sum(episode_length)/len(episode_length), sum(num_comm)/len(num_comm)]
+            if num_agents == 4:
+                csv_logger.writerow(header)
+            csv_logger.writerow(data)
+            csv_file.flush()
 
     elif isinstance(model_range, tuple):
 
@@ -117,7 +146,7 @@ def test_model_custom_env(model_range: Union[int, tuple]):
 
 def test_one_case(args):
 
-    env_set, network = args
+    env_set, network, num_agents = args
 
     env = Environment()
     env.load(env_set[0], env_set[1], env_set[2])
@@ -126,17 +155,22 @@ def test_one_case(args):
     done = False
     network.reset()
 
-    step = 0
+    episode_length = 0
+    total_step = 0
     num_comm = 0
     while not done and env.steps < config.max_episode_length:
         actions, _, _, _, comm_mask = network.step(torch.as_tensor(obs.astype(np.float32)).to(DEVICE), 
                                                     torch.as_tensor(last_act.astype(np.float32)).to(DEVICE), 
                                                     torch.as_tensor(pos.astype(int)))
         (obs, last_act, pos), _, done, _ = env.step(actions)
-        step += 1
-        num_comm += np.sum(comm_mask)
 
-    return np.array_equal(env.agents_pos, env.goals_pos), step, num_comm
+        episode_length += 1
+        total_step += np.count_nonzero(actions)
+        num_comm += np.sum(comm_mask)
+    
+    avg_step = total_step / num_agents
+
+    return np.array_equal(env.agents_pos, env.goals_pos), episode_length, num_comm, total_step, avg_step
 
 
 

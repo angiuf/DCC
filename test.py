@@ -16,7 +16,8 @@ import config
 torch.manual_seed(config.test_seed)
 np.random.seed(config.test_seed)
 random.seed(config.test_seed)
-DEVICE = torch.device('cpu')
+# DEVICE = torch.device('cpu')
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_num_threads(1)
 
 def create_test(test_env_settings: Tuple = config.test_env_settings, num_test_cases: int = config.num_test_cases):

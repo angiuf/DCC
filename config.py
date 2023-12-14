@@ -63,7 +63,7 @@ cl_history_size = 100
 
 test_seed = 0
 num_test_cases = 200
-n_agents = 22
+n_agents = 4
 # test_env_settings = (
 #                     (40, 4, 0.3), (40, 8, 0.3), 
 #                     (40, 16, 0.3), 
