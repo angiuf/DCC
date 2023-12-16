@@ -71,6 +71,17 @@ def test_model_custom_env(model_range: Union[int, tuple]):
     model_name = 'evaluation_custom_warehouse_SCRIMP_' + date
     csv_file, csv_logger = get_csv_logger(model_path, model_name)
 
+    list_num_agents = [4, 8, 12, 16, 20, 22]
+    num_test_cases = 200
+    dataset_path = '/home/andrea/Thesis/baselines/Dataset/'
+    map_name = '15_simple_warehouse'
+    model_name = "DCC"
+
+    # create output folder if not exists
+    output_dir = dataset_path + map_name + "/output/" + model_name + "/"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     if isinstance(model_range, int):
         state_dict = torch.load(os.path.join(config.save_path, f'{model_range}.pth'), map_location=DEVICE)
         network.load_state_dict(state_dict)
@@ -86,30 +97,36 @@ def test_model_custom_env(model_range: Union[int, tuple]):
         #     print(len(tests))
 
         # create test set with random environment
-        list_num_agents = [4, 8, 12, 16, 20, 22]
         for num_agents in list_num_agents:
-            tests = []
-            print("creating test set")
-            for _ in tqdm(range(config.num_test_cases)):
-                tests.append((get_warehouse_obs(), get_agents_and_goal(num_agents)[0], get_agents_and_goal(num_agents)[1]))
+            print("loading test set")
+            tests = load_test_set(dataset_path, map_name, num_agents, num_test_cases, network)
 
-            tests = [(test, network, num_agents) for test in tests]
+            # Create output directory if it doesn't exist
+            output_agent_dir = output_dir + str(num_agents) + "_agents" + "/"
+            if not os.path.exists(output_agent_dir):
+                os.makedirs(output_agent_dir)
 
             print("testing...")
             ret = pool.map(test_one_case, tests)
 
-            success, episode_length, num_comm, total_steps, avg_step = zip(*ret)
+            success, episode_length, num_comm, total_steps, avg_step, max_step, solution = zip(*ret)
+
+            # save solution
+            for i in range(num_test_cases):
+                filepath = output_agent_dir + "solution_" + model_name + "_" + map_name + "_" + str(num_agents) + "_agents_ID_" + str(i).zfill(5) + ".npy"
+                np.save(filepath, solution[i])
 
 
             print("success rate: {:.2f}%".format(sum(success)/len(success)*100))
             print("episode_length: {}".format(sum(episode_length)/len(episode_length)))
             print("total_steps: {}".format(sum(total_steps)/len(total_steps)))
             print("avg_step: {}".format(sum(avg_step)/len(avg_step)))
+            print("max_step: {}".format(sum(max_step)/len(max_step)))
             print("communication times: {}".format(sum(num_comm)/len(num_comm)))
             print()
 
-            header = ["n_agents", "success_rate", "total_step", "avg_step", "episode_length", "communication_times"]
-            data = [num_agents, sum(success)/len(success)*100, sum(total_steps)/len(total_steps), sum(avg_step)/len(avg_step), sum(episode_length)/len(episode_length), sum(num_comm)/len(num_comm)]
+            header = ["n_agents", "success_rate", "total_step", "avg_step", "max_step", "episode_length", "communication_times"]
+            data = [num_agents, sum(success)/len(success)*100, sum(total_steps)/len(total_steps), sum(avg_step)/len(avg_step), sum(max_step)/len(max_step), sum(episode_length)/len(episode_length), sum(num_comm)/len(num_comm)]
             if num_agents == 4:
                 csv_logger.writerow(header)
             csv_logger.writerow(data)
@@ -155,22 +172,36 @@ def test_one_case(args):
     done = False
     network.reset()
 
+    # Initialize a dict solution with the starting positions
+    solution = env.agents_pos
+    solution = [[np.append(pos, 0)] for pos in solution]
+
     episode_length = 0
     total_step = 0
     num_comm = 0
+    steps = np.zeros(num_agents)
+
     while not done and env.steps < config.max_episode_length:
         actions, _, _, _, comm_mask = network.step(torch.as_tensor(obs.astype(np.float32)).to(DEVICE), 
                                                     torch.as_tensor(last_act.astype(np.float32)).to(DEVICE), 
                                                     torch.as_tensor(pos.astype(int)))
         (obs, last_act, pos), _, done, _ = env.step(actions)
 
+        for i in range(num_agents):
+            if actions[i] != 0:
+                steps[i] += 1
         episode_length += 1
         total_step += np.count_nonzero(actions)
         num_comm += np.sum(comm_mask)
+
+        # Update the solution
+        for i in range(num_agents):
+            solution[i].append(np.append(pos[i], episode_length))
     
     avg_step = total_step / num_agents
+    max_step = np.max(steps)
 
-    return np.array_equal(env.agents_pos, env.goals_pos), episode_length, num_comm, total_step, avg_step
+    return np.array_equal(env.agents_pos, env.goals_pos), episode_length, num_comm, total_step, avg_step, max_step, solution
 
 
 
@@ -186,88 +217,16 @@ def code_test():
     
 
 
-def get_warehouse_obs():
-    return np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                      [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0],
-                      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-                      [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0],
-                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                      [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0],
-                      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-                      [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0],
-                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                      [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0],
-                      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-                      [0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0],
-                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                      ])
+def load_test_set(dataset_path, map_name, num_agents, num_test_cases, network):
+    tests = []
+    map = np.load(dataset_path + map_name + '/input/map/' + map_name + '.npy')
+    for i in tqdm(range(num_test_cases)):
+        case_filepath = dataset_path + '/' + map_name + '/input/start_and_goal/' + str(num_agents) + '_agents/' + map_name + '_' + str(num_agents) + '_agents_ID_' + str(i).zfill(5) + '.npy'
+        start_pos, goal_pos = np.load(case_filepath, allow_pickle=True)
+        tests.append([map, start_pos, goal_pos])
 
-def get_agents_and_goal(n_agents):    
-    open_list = [[3, 0],
-                 [4, 0],
-                 [5, 0],
-                 [6, 0],
-                 [7, 0],
-                 [8, 0],
-                 [9, 0],
-                 [10, 0],
-                 [11, 0],
-                 [12, 0], 
-                 [3, 14],
-                 [4, 14],
-                 [5, 14],
-                 [6, 14],
-                 [7, 14],
-                 [8, 14],
-                 [9, 14],
-                 [10, 14],
-                 [11, 14],
-                 [12, 14],
-                 [2, 4],
-                 [2, 6],
-                 [2, 8],
-                 [2, 10],
-                 [4, 4],
-                 [4, 6],
-                 [4, 8],
-                 [4, 10],
-                 [6, 4],
-                 [6, 6],
-                 [6, 8],
-                 [6, 10],
-                 [8, 4],
-                 [8, 6],
-                 [8, 8],
-                 [8, 10],
-                 [10, 4],
-                 [10, 6],
-                 [10, 8],
-                 [10, 10],
-                 [12, 4],
-                 [12, 6],
-                 [12, 8],
-                 [12, 10]]
-    
-    # Error if n_agents > len(open_list)
-    if n_agents > len(open_list)/2:
-        raise ValueError(f"n_agents %d must be less than or equal to the available pairs of start/goal positions %d" % (n_agents, len(open_list)/2))
-    
-    start_pos = []
-    goal_pos = []
-    for i in range(n_agents):
-        # Randomly choose a starting point
-        start = random.choice(open_list)
-        open_list.remove(start)
-        # Randomly choose a goal point
-        goal = random.choice(open_list)
-        open_list.remove(goal)
-        start_pos.append(start)
-        goal_pos.append(goal)
-    
-    return np.array(start_pos), np.array(goal_pos)
-
+    tests = [(test, network, num_agents) for test in tests]
+    return tests
 
 if __name__ == '__main__':
 
