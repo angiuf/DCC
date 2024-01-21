@@ -14,10 +14,13 @@ from model import Network
 import config
 import datetime
 import csv
+import threading
 
+mp.set_start_method('spawn', force=True)
 torch.manual_seed(config.test_seed)
 np.random.seed(config.test_seed)
 random.seed(config.test_seed)
+# DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 DEVICE = torch.device('cpu')
 torch.set_num_threads(1)
 
@@ -64,17 +67,18 @@ def test_model_custom_env(model_range: Union[int, tuple]):
     network.eval()
     network.to(DEVICE)
 
-    pool = mp.Pool(mp.cpu_count()//2)
+    # pool = mp.Pool(torch.cuda.device_count())
+    pool = mp.Pool(mp.cpu_count()//2)    
 
     model_path = "./final/"
     date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
     model_name = 'evaluation_custom_warehouse_SCRIMP_' + date
     csv_file, csv_logger = get_csv_logger(model_path, model_name)
 
-    list_num_agents = [4, 8, 12, 16, 20, 22]
+    list_num_agents = [128, 256]
     num_test_cases = 200
     dataset_path = '/home/andrea/Thesis/baselines/Dataset/'
-    map_name = '15_simple_warehouse'
+    map_name = '50_55_simple_warehouse'
     model_name = "DCC"
 
     # create output folder if not exists
@@ -109,12 +113,23 @@ def test_model_custom_env(model_range: Union[int, tuple]):
             print("testing...")
             ret = pool.map(test_one_case, tests)
 
-            success, episode_length, num_comm, total_steps, avg_step, max_step, solution = zip(*ret)
+            success, episode_length, num_comm, total_steps, avg_step, max_step, coll_rate, solution = zip(*ret)
 
             # save solution
             for i in range(num_test_cases):
+                out = dict()
+                out["finished"] = success[i]
+                if out["finished"]:
+                    out["total_step"] = total_steps[i]
+                    out["avg_step"] = avg_step[i]
+                    out["max_step"] = max_step[i]
+                    out["episode_length"] = episode_length[i]
+                out["communication_times"] = num_comm[i]
+                out["collision_rate"] = coll_rate[i]
+
+                save_dict = {"metrics": out, "solution": solution[i]}
                 filepath = output_agent_dir + "solution_" + model_name + "_" + map_name + "_" + str(num_agents) + "_agents_ID_" + str(i).zfill(5) + ".npy"
-                np.save(filepath, solution[i])
+                np.save(filepath, save_dict)
 
 
             print("success rate: {:.2f}%".format(sum(success)/len(success)*100))
@@ -123,10 +138,11 @@ def test_model_custom_env(model_range: Union[int, tuple]):
             print("avg_step: {}".format(sum(avg_step)/len(avg_step)))
             print("max_step: {}".format(sum(max_step)/len(max_step)))
             print("communication times: {}".format(sum(num_comm)/len(num_comm)))
+            print("collision_rate: {}".format(sum(coll_rate)/len(coll_rate)*100))
             print()
 
-            header = ["n_agents", "success_rate", "total_step", "avg_step", "max_step", "episode_length", "communication_times"]
-            data = [num_agents, sum(success)/len(success)*100, sum(total_steps)/len(total_steps), sum(avg_step)/len(avg_step), sum(max_step)/len(max_step), sum(episode_length)/len(episode_length), sum(num_comm)/len(num_comm)]
+            header = ["n_agents", "success_rate", "total_step", "avg_step", "max_step", "episode_length", "communication_times", "collision_rate", "total_step_std", "avg_step_std", "max_step_std", "episode_length_std", "total_step_min", "avg_step_min", "max_step_min", "episode_length_min", "total_step_max", "avg_step_max", "max_step_max", "episode_length_max"]
+            data = [num_agents, sum(success)/len(success)*100, sum(total_steps)/len(total_steps), sum(avg_step)/len(avg_step), sum(max_step)/len(max_step), sum(episode_length)/len(episode_length), sum(num_comm)/len(num_comm), sum(coll_rate)/len(coll_rate)*100, np.std(total_steps), np.std(avg_step), np.std(max_step), np.std(episode_length), np.min(total_steps), np.min(avg_step), np.min(max_step), np.min(episode_length), np.max(total_steps), np.max(avg_step), np.max(max_step), np.max(episode_length)]
             if num_agents == 4:
                 csv_logger.writerow(header)
             csv_logger.writerow(data)
@@ -161,9 +177,21 @@ def test_model_custom_env(model_range: Union[int, tuple]):
             print('\n')
             
 
+class TestCustomEnv:
+    counter = 0
+    counter_lock = threading.Lock()
+
+    @staticmethod
+    def print_episode():
+        with TestCustomEnv.counter_lock:
+            TestCustomEnv.counter += 1
+            print(f"Current episode: {TestCustomEnv.counter}")
+
 def test_one_case(args):
 
     env_set, network, num_agents = args
+    TestCustomEnv.print_episode()
+    
 
     env = Environment()
     env.load(env_set[0], env_set[1], env_set[2])
@@ -179,13 +207,20 @@ def test_one_case(args):
     episode_length = 0
     total_step = 0
     num_comm = 0
+    num_coll = 0
     steps = np.zeros(num_agents)
 
     while not done and env.steps < config.max_episode_length:
         actions, _, _, _, comm_mask = network.step(torch.as_tensor(obs.astype(np.float32)).to(DEVICE), 
                                                     torch.as_tensor(last_act.astype(np.float32)).to(DEVICE), 
                                                     torch.as_tensor(pos.astype(int)))
-        (obs, last_act, pos), _, done, _ = env.step(actions)
+        (obs, last_act, pos), rewards, done, _ = env.step(actions)
+
+        # Get the number of collisions (There is a collision if the reward is -0.5)
+        for i in range(num_agents):
+            if rewards[i] == -0.5:
+                num_coll += 1
+
 
         for i in range(num_agents):
             if actions[i] != 0:
@@ -200,8 +235,9 @@ def test_one_case(args):
     
     avg_step = total_step / num_agents
     max_step = np.max(steps)
+    coll_rate = num_coll / (num_agents * (episode_length + 1))
 
-    return np.array_equal(env.agents_pos, env.goals_pos), episode_length, num_comm, total_step, avg_step, max_step, solution
+    return np.array_equal(env.agents_pos, env.goals_pos), episode_length, num_comm, total_step, avg_step, max_step, coll_rate, solution
 
 
 
