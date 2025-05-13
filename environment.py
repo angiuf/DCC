@@ -308,7 +308,7 @@ class Environment:
 
                 target_agent_id = np.where(np.all(next_pos[agent_id]==self.agents_pos, axis=1))[0]
 
-                if target_agent_id:
+                if target_agent_id.size > 0:
 
                     target_agent_id = target_agent_id.item()
 
