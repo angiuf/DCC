@@ -369,7 +369,7 @@ class TestCustomEnv:
     def print_episode():
         with TestCustomEnv.counter_lock:
             TestCustomEnv.counter += 1
-            print(f"Current episode: {TestCustomEnv.counter}")
+            # print(f"Current episode: {TestCustomEnv.counter}")
 
 def test_one_case(args):
     env_set, network, num_agents, map_data = args
