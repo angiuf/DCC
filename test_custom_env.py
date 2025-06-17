@@ -153,20 +153,26 @@ def test_model_custom_env(model_range: Union[int, tuple]):
             "map_name": "15_15_simple_warehouse",
             "size": 15,
             "n_tests": 200,
-            "list_num_agents": [4, 8, 12, 16, 20, 22]
+            "list_num_agents": [4,8,12,16,20,22]
         },
         {
             "map_name": "50_55_simple_warehouse",
             "size": 50,
             "n_tests": 200,
-            "list_num_agents": [4, 8, 16, 32, 64, 128, 256]
+            "list_num_agents": [4, 8, 16, 32]
         },
         {
             "map_name": "50_55_long_shelves",
             "size": 50,
             "n_tests": 200,
-            "list_num_agents": [4, 8, 16, 32, 64, 128, 256]
+            "list_num_agents": [4, 8]
         },
+        {
+            "map_name": "50_55_open_space_warehouse_bottom",
+            "size": 50,
+            "n_tests": 200,
+            "list_num_agents": [4, 8, 16]
+        }
     ]
 
     header = ["n_agents", 
@@ -305,8 +311,10 @@ def test_model_custom_env(model_range: Union[int, tuple]):
 
                 data = [num_agents, 
                         final_results['finished'] * 100,  # convert to percentage
-                        0,  # time (not tracked by DCC)
-                        0, 0, 0,  # time std, min, max
+                        np.mean(time) if time else 0,
+                        np.std(time) if time else 0,
+                        np.min(time) if time else 0,
+                        np.max(time) if time else 0,
                         np.mean(successful_episode_length) if successful_episode_length else 0,
                         np.std(successful_episode_length) if successful_episode_length else 0,
                         np.min(successful_episode_length) if successful_episode_length else 0,
